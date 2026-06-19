@@ -85,7 +85,7 @@ export default function NotationForm() {
     }, [selectedActions, availableActions, customActionChecked, customAction]);
 
     const notation = useMemo(() => {
-        if (!serviceType || !callReason || !verification) return '';
+        if (!serviceType || !callReason) return '';
         const reasonText =
             callReason === 'custom' ? customReason.trim() : selectedReasonLabel;
         if (!reasonText) return '';
@@ -95,7 +95,8 @@ export default function NotationForm() {
             `2. CCI about ${reasonText}`,
         ];
         if (goal) lines.push(`3. ${goal}`);
-        lines.push(`${goal ? '4' : '3'}. ${verification} ${actionsText}`);
+        const actionLine = verification ? `${verification} ${actionsText}` : actionsText;
+        lines.push(`${goal ? '4' : '3'}. ${actionLine}`);
         return lines.join('\n');
     }, [serviceType, callReason, customReason, selectedServiceLabel, selectedReasonLabel, customerGoal, verification, actionsText]);
 
@@ -135,7 +136,7 @@ export default function NotationForm() {
                 </div>
                 <button
                     onClick={handleReset}
-                    className="text-xs font-semibold text-red-100 border border-red-300 px-3 py-1.5 rounded-lg hover:bg-red-700 transition-colors"
+                    className="text-xs cursor-pointer font-semibold text-red-100 border border-red-300 px-3 py-1.5 rounded-lg hover:bg-red-700 transition-colors"
                 >
                     New Call
                 </button>
@@ -227,9 +228,20 @@ export default function NotationForm() {
                                 <Divider />
                                 <Section step={4} label="Verification & Actions">
                                     {/* CIV pill row */}
-                                    <div className="flex items-center gap-3 flex-wrap">
-                                        <span className="text-sm font-semibold text-gray-600 w-8 shrink-0">CIV:</span>
-                                        <div className="flex gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="text-sm font-semibold text-gray-600 shrink-0">CIV:</span>
+                                        <div className="flex gap-2 items-center flex-wrap">
+                                            <button
+                                                type="button"
+                                                onClick={() => setVerification('')}
+                                                className={`px-3 py-1 rounded-full text-sm font-bold border-2 transition-all ${!verification
+                                                        ? 'bg-[#CC0000] border-[#CC0000] text-white shadow-sm'
+                                                        : 'bg-white border-gray-200 text-gray-500 hover:border-[#CC0000] hover:text-[#CC0000]'
+                                                    }`}
+                                            >
+                                                Standard
+                                            </button>
+                                            <span className="text-gray-300 text-xs font-semibold tracking-wide">High:</span>
                                             {VERIFICATION_METHODS.map(method => (
                                                 <button
                                                     key={method}
@@ -305,13 +317,6 @@ export default function NotationForm() {
                     </div>
                 </div>
 
-                {/* ── Hint when verification is missing ── */}
-                {step4Visible && !verification && (
-                    <p className="text-center text-xs text-muted-foreground">
-                        Select a verification method (CIV) above to generate the notation.
-                    </p>
-                )}
-
                 {/* ── Generated Notation ── */}
                 {notation && (
                     <div
@@ -324,7 +329,7 @@ export default function NotationForm() {
                             </span>
                             <button
                                 onClick={copyToClipboard}
-                                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all ${copied
+                                className={`flex cursor-pointer items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all ${copied
                                         ? 'bg-green-500 text-white'
                                         : 'bg-[#CC0000] text-white hover:bg-[#AA0000] active:scale-95'
                                     }`}
