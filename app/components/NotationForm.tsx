@@ -6,8 +6,11 @@ import {
     CALL_REASONS,
     ACTION_OPTIONS,
     VERIFICATION_METHODS,
+    ESCALATION_TRIGGERS,
     type ServiceTypeValue,
     type VerificationMethod,
+    type Variables,
+    type EscalationTrigger,
 } from '@/app/lib/notationData';
 import {
     Select,
@@ -18,13 +21,25 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
+import { NotionBooleanVariable } from '../lib/NotationVariable';
+import UserInputDialog from './UserInputDialog';
+import { CookiesProvider, useCookies } from 'react-cookie';
+import { Field } from '@/components/ui/field';
+import { Label } from '@/components/ui/label';
+import { Flag, FlagIcon } from 'lucide-react';
+import { reportNote } from '../lib/actions';
+import { toast } from '@/components/ui/toast';
+import { useRouter } from 'next/navigation';
 
 const textareaClass =
     'w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm ' +
     'transition-colors outline-none placeholder:text-muted-foreground resize-none leading-relaxed ' +
     'focus-visible:outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50';
 
+export type Position = 'HPX' | 'Core'
+
 export default function NotationForm() {
+    const [cookies, setCookie, removeCookie] = useCookies(['position', 'eid']);
     const [serviceType, setServiceType] = useState<ServiceTypeValue | ''>('');
     const [callReason, setCallReason] = useState('');
     const [customerGoal, setCustomerGoal] = useState('');
@@ -33,14 +48,31 @@ export default function NotationForm() {
     const [customReason, setCustomReason] = useState('');
     const [customActionChecked, setCustomActionChecked] = useState(false);
     const [customAction, setCustomAction] = useState('');
+    const [refNumber, setRefNumber] = useState('');
+    const [actionVariables, setActionVariables] = useState<Record<string, Variables>>({})
     const [copied, setCopied] = useState(false);
+    const [reported, setReported] = useState(false);
+    const [mounted, setMounted] = useState(false);
+    const [notationType, setNotationType] = useState<'standard' | 'escalated'>('standard');
+    const [incidentDescription, setIncidentDescription] = useState('');
+    const [escalationTrigger, setEscalationTrigger] = useState<EscalationTrigger | ''>('');
+    const [desiredResolution, setDesiredResolution] = useState('');
+    const [expectationsSet, setExpectationsSet] = useState('');
 
     const notationRef = useRef<HTMLDivElement>(null);
 
     const availableReasons = serviceType ? CALL_REASONS[serviceType] : [];
-    const availableActions = callReason ? (ACTION_OPTIONS[callReason] ?? []) : [];
+    const availableActions = callReason ? (ACTION_OPTIONS[callReason] ?? ACTION_OPTIONS[serviceType] ?? []) : [];
     const selectedReasonLabel = availableReasons.find(r => r.value === callReason)?.label ?? '';
     const selectedServiceLabel = SERVICE_TYPES.find(s => s.value === serviceType)?.label ?? '';
+
+    const position = cookies.position;
+    const eid = cookies.eid;
+
+    const step2Visible = !!serviceType;
+    const step3Visible = !!callReason;
+    const isDigitalIssue = serviceType === 'digital-issues';
+    const step4Visible = !!callReason && !isDigitalIssue || !!customerGoal;
 
     const handleServiceChange = (value: string | null) => {
         setServiceType(value as ServiceTypeValue);
@@ -58,10 +90,25 @@ export default function NotationForm() {
         if (value !== 'custom') setCustomReason('');
     };
 
-    const toggleAction = (value: string) => {
+    const toggleAction = (value: string, variables?: Variables) => {
+        const isSelected = selectedActions.includes(value);
         setSelectedActions(prev =>
-            prev.includes(value) ? prev.filter(a => a !== value) : [...prev, value]
+            isSelected ? prev.filter(a => a !== value) : [...prev, value]
         );
+        setActionVariables(prev => {
+            if (isSelected) {
+                const { [value]: _, ...rest } = prev;
+                return rest;
+            }
+            if (variables) {
+                // Clone each instance so the static ACTION_OPTIONS data is never mutated
+                const cloned = Object.fromEntries(
+                    Object.entries(variables).map(([k, v]) => [k, v.clone()])
+                );
+                return { ...prev, [value]: cloned };
+            }
+            return prev;
+        });
     };
 
     const handleReset = () => {
@@ -73,32 +120,61 @@ export default function NotationForm() {
         setCustomReason('');
         setCustomActionChecked(false);
         setCustomAction('');
+        setRefNumber('');
+        setActionVariables({});
         setCopied(false);
+        setReported(false);
+        setNotationType('standard');
+        setIncidentDescription('');
+        setEscalationTrigger('');
+        setDesiredResolution('');
+        setExpectationsSet('');
     };
 
     const actionsText = useMemo(() => {
-        const labels = selectedActions.map(
-            a => availableActions.find(opt => opt.value === a)?.label ?? a
-        );
+        const labels = selectedActions.map(a => {
+            const action = availableActions.find(opt => opt.value === a);
+            if (!action) return a;
+            let label = action.label;
+            const vars = actionVariables[a];
+            if (action.variableLabel && vars && Object.values(vars).every(v => (v.getValue() ?? '') !== '')) {
+                label = action.variableLabel.replace(/%(\w+)%/g, (_, key) => vars[key]?.getValue() ?? '');
+            }
+            return label;
+        });
         if (customActionChecked && customAction.trim()) labels.push(customAction.trim());
         return labels.length === 0 ? 'set expectations' : labels.join(', ');
-    }, [selectedActions, availableActions, customActionChecked, customAction]);
+    }, [selectedActions, availableActions, customActionChecked, customAction, actionVariables]);
 
     const notation = useMemo(() => {
-        if (!serviceType || !callReason) return '';
+        if (notationType === 'escalated') {
+            if (!incidentDescription.trim() || !escalationTrigger || !desiredResolution.trim() || !expectationsSet.trim()) return '';
+            const triggerLabel = ESCALATION_TRIGGERS.find(t => t.value === escalationTrigger)?.label ?? escalationTrigger;
+            return [
+                'HPX Notes',
+                `1. Description of the incident: ${incidentDescription.trim()}`,
+                `2. Why did it meet the selected trigger: ${triggerLabel}`,
+                `3. Desired resolution the customer looking for: ${desiredResolution.trim()}`,
+                `4. What expectations were set with the customer: ${expectationsSet.trim()}`,
+            ].join('\n');
+        }
+        const allStepsVisible = step2Visible && step3Visible && step4Visible;
+        if (!serviceType || !callReason || !allStepsVisible) return '';
         const reasonText =
             callReason === 'custom' ? customReason.trim() : selectedReasonLabel;
         if (!reasonText) return '';
         const goal = customerGoal.trim();
-        const lines: string[] = [
-            `1. ${selectedServiceLabel}`,
-            `2. CCI about ${reasonText}`,
-        ];
-        if (goal) lines.push(`3. ${goal}`);
-        const actionLine = verification ? `${verification} ${actionsText}` : actionsText;
+        const lines: string[] = [];
+        if (position) lines.push(position === 'HPX' ? 'HPX Notes' : 'Core Notes');
+        lines.push(`1. ${selectedServiceLabel}`);
+        lines.push(`2. CCI about ${reasonText}`);
+        if (goal) lines.push(`3. CG ${goal}`);
+        const actionLine = verification ? `[${verification}${verification === 'GOV' && !!refNumber.trim() ? ` ${refNumber}` : ''}] ${actionsText}` : actionsText;
         lines.push(`${goal ? '4' : '3'}. ${actionLine}`);
         return lines.join('\n');
-    }, [serviceType, callReason, customReason, selectedServiceLabel, selectedReasonLabel, customerGoal, verification, actionsText]);
+    }, [notationType, serviceType, callReason, customReason, refNumber, selectedServiceLabel, selectedReasonLabel, customerGoal, verification, actionsText, position, incidentDescription, escalationTrigger, desiredResolution, expectationsSet]);
+
+    useEffect(() => { setMounted(true); }, []);
 
     // Scroll notation into view when it first appears
     useEffect(() => {
@@ -115,12 +191,60 @@ export default function NotationForm() {
         setTimeout(() => setCopied(false), 2000);
     };
 
-    const step2Visible = !!serviceType;
-    const step3Visible = !!callReason;
-    const step4Visible = !!callReason;
+    const submitReport = async () => {
+        const actionsFilled = !customActionChecked || !!customAction;
+        const reasonFilled = callReason !== 'custom' || !!customReason
+        const missingInformation = !notation || !actionsFilled || !reasonFilled
+        const notSignedIn = !eid
+        if (notSignedIn) return toast.add({
+            type: "error",
+            description: "You're missing your employee information to be able to report.",
+            actionProps: {
+                children: "Refresh",
+                onClick() {
+                    window.location.reload();
+                },
+            },
+        });
+        if (missingInformation) return toast.add({
+            type: "error",
+            description: "Please complete the notation before reporting.",
+        });
+        if (reported) return toast.add({
+            type: "error",
+            description: "You already reported this note.",
+        });
+        const reasonText =
+            callReason === 'custom' ? customReason.trim() : selectedReasonLabel;
+        await reportNote(serviceType, { eid: cookies.eid, action: actionsText, reason: reasonText, fullNote: notation })
+        setReported(true);
+        toast.add({
+            type: 'success',
+            description: 'Toast has been successfully reported!'
+        })
+    };
+
+    const getVariable = (action: string, variable: string) => {
+        return actionVariables[action]?.[variable];
+    };
+
+    const setVariable = (action: string, variable: string, value: string) => {
+        setActionVariables(prev => {
+            if (!prev[action]?.[variable]) return prev;
+            const cloned = prev[action][variable].clone();
+            cloned.setValue(value);
+            return {
+                ...prev,
+                [action]: { ...prev[action], [variable]: cloned },
+            };
+        });
+    };
+
+    const availablePositionedActions = availableActions.filter(action => !action.position || action.position === position)
 
     return (
         <div className="min-h-screen bg-gray-50">
+            <UserInputDialog />
             {/* Top bar */}
             <header className="bg-[#CC0000] px-6 py-3 flex items-center justify-between shadow-md">
                 <div className="flex items-center gap-3">
@@ -131,7 +255,7 @@ export default function NotationForm() {
                         <span className="text-white font-bold text-base tracking-tight">Bank Voice Admin</span>
                     </div>
                     <span className="text-red-300 text-xs font-medium hidden sm:block">
-                        · High Priority · Notation Builder
+                        · Notation Builder
                     </span>
                 </div>
                 <button
@@ -142,179 +266,328 @@ export default function NotationForm() {
                 </button>
             </header>
 
+            {/* ── Role selector / Notation type ── */}
+            <div className="bg-white border-b border-gray-200 px-6 py-2.5 flex items-center gap-3">
+                {mounted && position === 'HPX' && (
+                    <>
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400 shrink-0">Type</span>
+                        <div className="flex gap-2">
+                            {(['standard', 'escalated'] as const).map(t => (
+                                <button key={t} type="button"
+                                    onClick={() => setNotationType(t)}
+                                    className={`px-3 py-1 rounded-full text-xs font-bold border-2 transition-all ${
+                                        notationType === t
+                                            ? 'bg-[#CC0000] border-[#CC0000] text-white shadow-sm'
+                                            : 'bg-white border-gray-200 text-gray-500 hover:border-[#CC0000] hover:text-[#CC0000]'
+                                    }`}
+                                >
+                                    {t === 'standard' ? 'Standard' : 'Escalated'}
+                                </button>
+                            ))}
+                        </div>
+                    </>
+                )}
+                {mounted && position && (
+                    <span className="text-xs text-gray-400 ml-auto">
+                        Noting as <span className="font-semibold text-gray-600">{position === 'HPX' ? 'HPX' : 'Core'}</span>
+                    </span>
+                )}
+            </div>
+
             <main className="max-w-2xl mx-auto py-8 px-4 space-y-4">
                 {/* ── Notation Form Card ── */}
                 <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                     <div className="px-6 pt-5 pb-4 border-b border-gray-100">
                         <h1 className="text-sm font-semibold text-gray-700">Customer Notation</h1>
                         <p className="text-xs text-gray-400 mt-0.5">
-                            Each section shapes the one below — fill top to bottom.
+                            {notationType === 'escalated'
+                                ? 'Document the details of the escalated interaction.'
+                                : 'Each section shapes the one below — fill top to bottom.'}
                         </p>
                     </div>
 
-                    <div className="px-6 py-5 space-y-6">
-                        {/* ── Step 1: Service Type ── */}
-                        <Section step={1} label="Type of Servicing">
-                            <Select value={serviceType || null} onValueChange={handleServiceChange}>
-                                <SelectTrigger className="w-full h-9 text-sm">
-                                    <SelectValue placeholder="Select service type…" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {SERVICE_TYPES.map(s => (
-                                        <SelectItem key={s.value} value={s.value}>
-                                            {s.label}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </Section>
-
-                        {/* ── Step 2: Call Reason ── */}
-                        {step2Visible && (
-                            <>
-                                <Divider />
-                                <Section step={2} label="Call Reason">
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="text-sm text-gray-600 font-medium shrink-0">
-                                            CCI about
-                                        </span>
-                                        <Select value={callReason || null} onValueChange={handleReasonChange}>
-                                            <SelectTrigger className="h-9 text-sm w-auto min-w-48 flex-1">
-                                                <SelectValue placeholder="select a reason…" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {availableReasons.map(r => (
-                                                    <SelectItem key={r.value} value={r.value}>
-                                                        {r.label}
-                                                    </SelectItem>
-                                                ))}
-                                                <SelectSeparator />
-                                                <SelectItem value="custom">Custom…</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                    {callReason === 'custom' && (
-                                        <Input
-                                            value={customReason}
-                                            onChange={e => setCustomReason(e.target.value)}
-                                            placeholder="Type the custom reason…"
-                                            className="mt-1 h-9 text-sm"
-                                            autoFocus
-                                        />
-                                    )}
-                                </Section>
-                            </>
-                        )}
-
-                        {/* ── Step 3: Customer Goal ── */}
-                        {step3Visible && (
-                            <Section step={3} label="Customer's Goal">
+                    {notationType === 'escalated' ? (
+                        /* ── Escalated form ── */
+                        <div className="px-6 py-5 space-y-6">
+                            <Section step={1} label="Description of Incident">
                                 <textarea
-                                    value={customerGoal}
-                                    onChange={e => setCustomerGoal(e.target.value)}
-                                    placeholder="Describe what result the customer was looking for…"
+                                    value={incidentDescription}
+                                    onChange={e => setIncidentDescription(e.target.value)}
+                                    placeholder="Describe the customer's situation..."
                                     rows={3}
                                     className={textareaClass}
                                 />
-                                <p className="text-xs text-muted-foreground mt-1">
-                                    Optional — leave blank to omit from notation.
-                                </p>
                             </Section>
-                        )}
+                            <Divider />
+                            <Section step={2} label="Escalation Trigger">
+                                <Select value={escalationTrigger || null} onValueChange={v => setEscalationTrigger(v as EscalationTrigger)}>
+                                    <SelectTrigger className="w-full h-9 text-sm">
+                                        <SelectValue placeholder="Select trigger...">
+                                            {() => ESCALATION_TRIGGERS.find(t => t.value === escalationTrigger)?.label || null}
+                                        </SelectValue>
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {ESCALATION_TRIGGERS.map(t => (
+                                            <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </Section>
+                            <Divider />
+                            <Section step={3} label="Desired Resolution">
+                                <textarea
+                                    value={desiredResolution}
+                                    onChange={e => setDesiredResolution(e.target.value)}
+                                    placeholder="What resolution was the customer looking for..."
+                                    rows={3}
+                                    className={textareaClass}
+                                />
+                            </Section>
+                            <Divider />
+                            <Section step={4} label="Expectations Set">
+                                <textarea
+                                    value={expectationsSet}
+                                    onChange={e => setExpectationsSet(e.target.value)}
+                                    placeholder="What expectations were communicated to the customer..."
+                                    rows={3}
+                                    className={textareaClass}
+                                />
+                            </Section>
+                        </div>
+                    ) : (
+                        /* ── Standard form ── */
+                        <div className="px-6 py-5 space-y-6">
+                            {/* ── Step 1: Service Type ── */}
+                            <Section step={1} label="Type of Servicing">
+                                <Select value={serviceType || null} onValueChange={handleServiceChange}>
+                                    <SelectTrigger className="w-full h-9 text-sm">
+                                        <SelectValue placeholder="Select service type...">
+                                            {() => selectedServiceLabel || null}
+                                        </SelectValue>
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {SERVICE_TYPES.map(s => (
+                                            <SelectItem key={s.value} value={s.value}>
+                                                {s.label}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </Section>
 
-                        {/* ── Step 4: Verification + Actions ── */}
-                        {step4Visible && (
-                            <>
-                                <Divider />
-                                <Section step={4} label="Verification & Actions">
-                                    {/* CIV pill row */}
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="text-sm font-semibold text-gray-600 shrink-0">CIV:</span>
-                                        <div className="flex gap-2 items-center flex-wrap">
-                                            <button
-                                                type="button"
-                                                onClick={() => setVerification('')}
-                                                className={`px-3 py-1 rounded-full text-sm font-bold border-2 transition-all ${!verification
+                            {/* ── Step 2: Call Reason ── */}
+                            {step2Visible && (
+                                <>
+                                    <Divider />
+                                    <Section step={2} label="Call Reason">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="text-sm text-gray-600 font-medium shrink-0">
+                                                Customer called in about
+                                            </span>
+                                            <Select value={callReason || null} onValueChange={handleReasonChange}>
+                                                <SelectTrigger className="h-9 text-sm w-auto min-w-48 flex-1">
+                                                    <SelectValue placeholder="select a reason...">
+                                                        {() => callReason === 'custom' ? 'Custom...' : selectedReasonLabel || null}
+                                                    </SelectValue>
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {availableReasons.map(r => (
+                                                        <SelectItem key={r.value} value={r.value}>
+                                                            {r.label}
+                                                        </SelectItem>
+                                                    ))}
+                                                    <SelectSeparator />
+                                                    <SelectItem value="custom">Custom...</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        {callReason === 'custom' && (
+                                            <Input
+                                                value={customReason}
+                                                onChange={e => setCustomReason(e.target.value)}
+                                                placeholder="Type the custom reason..."
+                                                className="mt-1 h-9 text-sm"
+                                                autoFocus
+                                            />
+                                        )}
+                                    </Section>
+                                </>
+                            )}
+
+                            {/* ── Step 3: Customer Goal ── */}
+                            {step3Visible && (
+                                <Section step={3} label="Customer's Goal">
+                                    <textarea
+                                        value={customerGoal}
+                                        onChange={e => setCustomerGoal(e.target.value)}
+                                        placeholder={isDigitalIssue ? "Describe the problem customer is facing..." : "Describe what result the customer was looking for..."}
+                                        rows={3}
+                                        className={textareaClass}
+                                    />
+                                    {!isDigitalIssue && <p className="text-xs text-muted-foreground mt-1">
+                                        Optional — leave blank to omit from notation.
+                                    </p>}
+                                </Section>
+                            )}
+
+                            {/* ── Step 4: Verification + Actions ── */}
+                            {step4Visible && (
+                                <>
+                                    <Divider />
+                                    <Section step={4} label="Verification & Actions">
+                                        {/* CIV pill row */}
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="text-sm font-semibold text-gray-600 shrink-0">CIV:</span>
+                                            <div className="flex gap-2 items-center flex-wrap">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setVerification('')}
+                                                    className={`px-3 py-1 rounded-full text-sm font-bold border-2 transition-all ${!verification
                                                         ? 'bg-[#CC0000] border-[#CC0000] text-white shadow-sm'
                                                         : 'bg-white border-gray-200 text-gray-500 hover:border-[#CC0000] hover:text-[#CC0000]'
-                                                    }`}
-                                            >
-                                                Standard
-                                            </button>
-                                            <span className="text-gray-300 text-xs font-semibold tracking-wide">High:</span>
-                                            {VERIFICATION_METHODS.map(method => (
-                                                <button
-                                                    key={method}
-                                                    type="button"
-                                                    onClick={() => setVerification(verification === method ? '' : method)}
-                                                    className={`px-3 py-1 rounded-full text-sm font-bold border-2 transition-all ${verification === method
-                                                            ? 'bg-[#CC0000] border-[#CC0000] text-white shadow-sm'
-                                                            : 'bg-white border-gray-200 text-gray-500 hover:border-[#CC0000] hover:text-[#CC0000]'
                                                         }`}
                                                 >
-                                                    {method}
+                                                    Standard
                                                 </button>
-                                            ))}
-                                        </div>
-                                    </div>
-
-                                    {/* Actions */}
-                                    <div className="mt-4 pl-11">
-                                        {availableActions.length > 0 ? (
-                                            <div className="space-y-2.5">
-                                                <p className="text-xs text-muted-foreground -mt-1">
-                                                    Select action(s) taken — defaults to{' '}
-                                                    <span className="italic">set expectations</span> if none selected.
-                                                </p>
-                                                {availableActions.map(action => (
-                                                    <CheckboxItem
-                                                        key={action.value}
-                                                        checked={selectedActions.includes(action.value)}
-                                                        onToggle={() => toggleAction(action.value)}
-                                                        label={action.label}
-                                                    />
+                                                <span className="text-gray-300 text-xs font-semibold tracking-wide">High:</span>
+                                                {VERIFICATION_METHODS.map(method => (
+                                                    <button
+                                                        key={method}
+                                                        type="button"
+                                                        onClick={() => setVerification(verification === method ? '' : method)}
+                                                        className={`px-3 py-1 rounded-full text-sm font-bold border-2 transition-all ${verification === method
+                                                            ? 'bg-[#CC0000] border-[#CC0000] text-white shadow-sm'
+                                                            : 'bg-white border-gray-200 text-gray-500 hover:border-[#CC0000] hover:text-[#CC0000]'
+                                                            }`}
+                                                    >
+                                                        {method}
+                                                    </button>
                                                 ))}
-                                                {selectedActions.length === 0 && !customActionChecked && (
-                                                    <p className="text-xs text-muted-foreground italic pt-1">
-                                                        → Will use{' '}
-                                                        <span className="font-medium not-italic">set expectations</span>
-                                                    </p>
-                                                )}
                                             </div>
-                                        ) : (
-                                            <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-                                                <span className="w-2 h-2 rounded-full bg-gray-300 shrink-0" />
-                                                <span className="italic">set expectations</span>
-                                            </div>
-                                        )}
+                                        </div>
 
-                                        {/* Custom action — always available */}
-                                        <div
-                                            className={`space-y-2 ${availableActions.length > 0
+                                        {/* Actions */}
+                                        <div className="mt-4 pl-11">
+                                            {verification && verification === 'GOV' && <Input
+                                                value={refNumber}
+                                                onChange={e => setRefNumber(e.target.value)}
+                                                placeholder="GOV ID Ref #.."
+                                                className="mb-4 h-9 text-sm"
+                                                autoFocus
+                                            />}
+                                            {availablePositionedActions.length > 0 ? (
+                                                <div className="space-y-2.5">
+                                                    <p className="text-xs text-muted-foreground -mt-1">
+                                                        Select action(s) taken — defaults to{' '}
+                                                        <span className="italic">set expectations</span> if none selected.
+                                                    </p>
+                                                    {availablePositionedActions.map(action => (
+                                                        <div key={action.value} className='space-y-2'>
+                                                            <CheckboxItem
+                                                                checked={selectedActions.includes(action.value)}
+                                                                onToggle={() => toggleAction(action.value, action.variables)}
+                                                                label={action.label}
+                                                            />
+                                                            {selectedActions.includes(action.value) && action.variables &&
+                                                                Object.entries(action.variables).map(([k, variable], i) => {
+                                                                    const inputVariable = getVariable(action.value, k)
+                                                                    return (<div key={i} className="flex items-center gap-2 flex-wrap">
+                                                                        <span className="text-sm text-gray-600 font-medium shrink-0">
+                                                                            {variable.getLabel()}
+                                                                        </span>
+                                                                        {inputVariable instanceof NotionBooleanVariable ?
+                                                                            <CheckboxItem
+                                                                                checked={inputVariable.isOn()}
+                                                                                onToggle={() => setVariable(action.value, k, inputVariable.isOn() ? inputVariable.getOffValue() : inputVariable.getOnValue())}
+                                                                                label="Yes"
+                                                                            />
+                                                                            :
+                                                                            <Input
+                                                                                value={inputVariable?.getValue() ?? ''}
+                                                                                onChange={e => setVariable(action.value, k, e.target.value)}
+                                                                                placeholder="Input"
+                                                                                className="h-9 text-sm w-auto min-w-48 flex-1"
+                                                                            />}
+                                                                    </div>)
+                                                                })
+                                                            }
+                                                        </div>
+                                                    ))}
+                                                    {selectedActions.length === 0 && !customActionChecked && (
+                                                        <p className="text-xs text-muted-foreground italic pt-1">
+                                                            → Will use{' '}
+                                                            <span className="font-medium not-italic">set expectations</span>
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+                                                    <span className="w-2 h-2 rounded-full bg-gray-300 shrink-0" />
+                                                    <span className="italic">set expectations</span>
+                                                </div>
+                                            )}
+
+                                            {/* Custom action — always available */}
+                                            <div
+                                                className={`space-y-2 ${availableActions.length > 0
                                                     ? 'mt-2 pt-2 border-t border-dashed border-gray-200'
                                                     : ''
-                                                }`}
-                                        >
-                                            <CheckboxItem
-                                                checked={customActionChecked}
-                                                onToggle={() => setCustomActionChecked(v => !v)}
-                                                label="Custom"
-                                            />
-                                            {customActionChecked && (
-                                                <Input
-                                                    value={customAction}
-                                                    onChange={e => setCustomAction(e.target.value)}
-                                                    placeholder="Type custom action…"
-                                                    className="h-9 text-sm"
-                                                    autoFocus
+                                                    }`}
+                                            >
+                                                <CheckboxItem
+                                                    checked={customActionChecked}
+                                                    onToggle={() => setCustomActionChecked(v => !v)}
+                                                    label="Custom"
                                                 />
-                                            )}
+                                                {customActionChecked && (
+                                                    <Input
+                                                        value={customAction}
+                                                        onChange={e => setCustomAction(e.target.value)}
+                                                        placeholder="Type custom action..."
+                                                        className="h-9 text-sm"
+                                                        autoFocus
+                                                    />
+                                                )}
+                                            </div>
                                         </div>
-                                    </div>
-                                </Section>
-                            </>
-                        )}
-                    </div>
+                                        {(customActionChecked || !!customReason) &&
+                                            <div className='flex gap-2 mt-5'>
+                                                <Label htmlFor='report'>Need to report this submission?</Label>
+                                                <button
+                                                    onClick={submitReport}
+                                                    id='report'
+                                                    className={`flex cursor-pointer items-center text-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all ${copied
+                                                        ? 'bg-green-500 text-white'
+                                                        : 'bg-[#CC0000] text-white hover:bg-[#AA0000] active:scale-95'
+                                                        }`}
+                                                >
+                                                    {reported ? (
+                                                        <>
+                                                            <svg className="w-3 h-3" viewBox="0 0 12 10" fill="none">
+                                                                <path
+                                                                    d="M1 5l4 4 6-8"
+                                                                    stroke="currentColor"
+                                                                    strokeWidth="1.8"
+                                                                    strokeLinecap="round"
+                                                                    strokeLinejoin="round"
+                                                                />
+                                                            </svg>
+                                                            Reported!
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <FlagIcon className='w-3 h-3' />
+                                                            Report
+                                                        </>
+                                                    )}
+                                                </button>
+                                            </div>
+                                        }
+                                    </Section>
+                                </>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 {/* ── Generated Notation ── */}
@@ -330,8 +603,8 @@ export default function NotationForm() {
                             <button
                                 onClick={copyToClipboard}
                                 className={`flex cursor-pointer items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all ${copied
-                                        ? 'bg-green-500 text-white'
-                                        : 'bg-[#CC0000] text-white hover:bg-[#AA0000] active:scale-95'
+                                    ? 'bg-green-500 text-white'
+                                    : 'bg-[#CC0000] text-white hover:bg-[#AA0000] active:scale-95'
                                     }`}
                             >
                                 {copied ? (
