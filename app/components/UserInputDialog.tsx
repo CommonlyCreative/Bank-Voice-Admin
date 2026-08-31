@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
     Dialog,
     DialogClose,
@@ -21,6 +21,11 @@ function UserInputDialog() {
     const [open, setOpen] = useState(!cookies.eid||!cookies.position);
     const [position, setPosition] = useState<Position | ''>(cookies.position ?? '')
     const [eid, setEid] = useState<string>(cookies.eid ?? '')
+
+    useEffect(() => {
+        if (!cookies.eid||!cookies.position)
+            setOpen(true)
+    }, [cookies])
 
     function submit() {
         if (!position||!eid)return;

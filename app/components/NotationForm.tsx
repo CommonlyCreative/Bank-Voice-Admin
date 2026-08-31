@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo, useRef, useEffect } from 'react';
+import Link from 'next/link';
 import {
     SERVICE_TYPES,
     CALL_REASONS,
@@ -11,22 +12,24 @@ import {
     type VerificationMethod,
     type Variables,
     type EscalationTrigger,
+    CallReasonValue,
 } from '@/app/lib/notationData';
 import {
     Select,
     SelectContent,
     SelectItem,
-    SelectSeparator,
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+
+import { Combobox } from '@/components/ui/combobox';
 import { Input } from '@/components/ui/input';
 import { NotionBooleanVariable } from '../lib/NotationVariable';
 import UserInputDialog from './UserInputDialog';
 import { CookiesProvider, useCookies } from 'react-cookie';
 import { Field } from '@/components/ui/field';
 import { Label } from '@/components/ui/label';
-import { Flag, FlagIcon } from 'lucide-react';
+import { Flag, FlagIcon, Plus, X } from 'lucide-react';
 import { reportNote } from '../lib/actions';
 import { toast } from '@/components/ui/toast';
 import { useRouter } from 'next/navigation';
@@ -41,13 +44,13 @@ export type Position = 'HPX' | 'Core'
 export default function NotationForm() {
     const [cookies, setCookie, removeCookie] = useCookies(['position', 'eid']);
     const [serviceType, setServiceType] = useState<ServiceTypeValue | ''>('');
-    const [callReason, setCallReason] = useState('');
+    const [callReason, setCallReason] = useState<ServiceTypeValue | CallReasonValue | 'custom' | ''>('');
     const [customerGoal, setCustomerGoal] = useState('');
     const [verification, setVerification] = useState<VerificationMethod | ''>('');
     const [selectedActions, setSelectedActions] = useState<string[]>([]);
     const [customReason, setCustomReason] = useState('');
     const [customActionChecked, setCustomActionChecked] = useState(false);
-    const [customAction, setCustomAction] = useState('');
+    const [customActions, setCustomActions] = useState<string[]>(['']);
     const [refNumber, setRefNumber] = useState('');
     const [actionVariables, setActionVariables] = useState<Record<string, Variables>>({})
     const [copied, setCopied] = useState(false);
@@ -62,7 +65,9 @@ export default function NotationForm() {
     const notationRef = useRef<HTMLDivElement>(null);
 
     const availableReasons = serviceType ? CALL_REASONS[serviceType] : [];
-    const availableActions = callReason ? (ACTION_OPTIONS[callReason] ?? ACTION_OPTIONS[serviceType] ?? []) : [];
+    const availableActions = callReason && callReason !== 'custom'
+        ? ACTION_OPTIONS[callReason] ?? (serviceType ? ACTION_OPTIONS[serviceType] : undefined) ?? []
+        : [];
     const selectedReasonLabel = availableReasons.find(r => r.value === callReason)?.label ?? '';
     const selectedServiceLabel = SERVICE_TYPES.find(s => s.value === serviceType)?.label ?? '';
 
@@ -81,10 +86,10 @@ export default function NotationForm() {
         setVerification('');
         setCustomReason('');
         setCustomActionChecked(false);
-        setCustomAction('');
+        setCustomActions(['']);
     };
 
-    const handleReasonChange = (value: string | null) => {
+    const handleReasonChange = (value: ServiceTypeValue | CallReasonValue | 'custom' | null) => {
         setCallReason(value ?? "");
         setSelectedActions([]);
         if (value !== 'custom') setCustomReason('');
@@ -111,6 +116,18 @@ export default function NotationForm() {
         });
     };
 
+    const updateCustomAction = (index: number, value: string) => {
+        setCustomActions(prev => prev.map((a, i) => (i === index ? value : a)));
+    };
+
+    const addCustomActionLine = () => {
+        setCustomActions(prev => [...prev, '']);
+    };
+
+    const removeCustomActionLine = (index: number) => {
+        setCustomActions(prev => prev.length === 1 ? [''] : prev.filter((_, i) => i !== index));
+    };
+
     const handleReset = () => {
         setServiceType('');
         setCallReason('');
@@ -119,7 +136,7 @@ export default function NotationForm() {
         setSelectedActions([]);
         setCustomReason('');
         setCustomActionChecked(false);
-        setCustomAction('');
+        setCustomActions(['']);
         setRefNumber('');
         setActionVariables({});
         setCopied(false);
@@ -142,9 +159,13 @@ export default function NotationForm() {
             }
             return label;
         });
-        if (customActionChecked && customAction.trim()) labels.push(customAction.trim());
-        return labels.length === 0 ? 'set expectations' : labels.join(', ');
-    }, [selectedActions, availableActions, customActionChecked, customAction, actionVariables]);
+        if (customActionChecked) {
+            for (const action of customActions) {
+                if (action.trim()) labels.push(action.trim());
+            }
+        }
+        return labels.join(', ');
+    }, [selectedActions, availableActions, customActionChecked, customActions, actionVariables]);
 
     const notation = useMemo(() => {
         if (notationType === 'escalated') {
@@ -163,6 +184,7 @@ export default function NotationForm() {
         const reasonText =
             callReason === 'custom' ? customReason.trim() : selectedReasonLabel;
         if (!reasonText) return '';
+        if (!actionsText) return '';
         const goal = customerGoal.trim();
         const lines: string[] = [];
         if (position) lines.push(position === 'HPX' ? 'HPX Notes' : 'Core Notes');
@@ -192,7 +214,7 @@ export default function NotationForm() {
     };
 
     const submitReport = async () => {
-        const actionsFilled = !customActionChecked || !!customAction;
+        const actionsFilled = !customActionChecked || customActions.some(a => !!a.trim());
         const reasonFilled = callReason !== 'custom' || !!customReason
         const missingInformation = !notation || !actionsFilled || !reasonFilled
         const notSignedIn = !eid
@@ -258,12 +280,20 @@ export default function NotationForm() {
                         · Notation Builder
                     </span>
                 </div>
-                <button
-                    onClick={handleReset}
-                    className="text-xs cursor-pointer font-semibold text-red-100 border border-red-300 px-3 py-1.5 rounded-lg hover:bg-red-700 transition-colors"
-                >
-                    New Call
-                </button>
+                <div className="flex items-center gap-2">
+                    <Link
+                        href="/admin"
+                        className="text-xs cursor-pointer font-semibold text-red-100 border border-red-300 px-3 py-1.5 rounded-lg hover:bg-red-700 transition-colors"
+                    >
+                        Admin Panel
+                    </Link>
+                    <button
+                        onClick={handleReset}
+                        className="text-xs cursor-pointer font-semibold text-red-100 border border-red-300 px-3 py-1.5 rounded-lg hover:bg-red-700 transition-colors"
+                    >
+                        New Call
+                    </button>
+                </div>
             </header>
 
             {/* ── Role selector / Notation type ── */}
@@ -384,22 +414,17 @@ export default function NotationForm() {
                                             <span className="text-sm text-gray-600 font-medium shrink-0">
                                                 Customer called in about
                                             </span>
-                                            <Select value={callReason || null} onValueChange={handleReasonChange}>
-                                                <SelectTrigger className="h-9 text-sm w-auto min-w-48 flex-1">
-                                                    <SelectValue placeholder="select a reason...">
-                                                        {() => callReason === 'custom' ? 'Custom...' : selectedReasonLabel || null}
-                                                    </SelectValue>
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {availableReasons.map(r => (
-                                                        <SelectItem key={r.value} value={r.value}>
-                                                            {r.label}
-                                                        </SelectItem>
-                                                    ))}
-                                                    <SelectSeparator />
-                                                    <SelectItem value="custom">Custom...</SelectItem>
-                                                </SelectContent>
-                                            </Select>
+                                            <Combobox
+                                                value={callReason || null}
+                                                onValueChange={(value) => handleReasonChange(value as ServiceTypeValue | CallReasonValue | 'custom')}
+                                                options={[
+                                                    ...availableReasons,
+                                                    { value: 'custom', label: 'Custom...' },
+                                                ]}
+                                                placeholder="select a reason..."
+                                                searchPlaceholder="Search reasons..."
+                                                className="w-auto min-w-48 flex-1"
+                                            />
                                         </div>
                                         {callReason === 'custom' && (
                                             <Input
@@ -475,12 +500,8 @@ export default function NotationForm() {
                                                 className="mb-4 h-9 text-sm"
                                                 autoFocus
                                             />}
-                                            {availablePositionedActions.length > 0 ? (
+                                            {availablePositionedActions.length > 0 && (
                                                 <div className="space-y-2.5">
-                                                    <p className="text-xs text-muted-foreground -mt-1">
-                                                        Select action(s) taken — defaults to{' '}
-                                                        <span className="italic">set expectations</span> if none selected.
-                                                    </p>
                                                     {availablePositionedActions.map(action => (
                                                         <div key={action.value} className='space-y-2'>
                                                             <CheckboxItem
@@ -513,17 +534,6 @@ export default function NotationForm() {
                                                             }
                                                         </div>
                                                     ))}
-                                                    {selectedActions.length === 0 && !customActionChecked && (
-                                                        <p className="text-xs text-muted-foreground italic pt-1">
-                                                            → Will use{' '}
-                                                            <span className="font-medium not-italic">set expectations</span>
-                                                        </p>
-                                                    )}
-                                                </div>
-                                            ) : (
-                                                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-                                                    <span className="w-2 h-2 rounded-full bg-gray-300 shrink-0" />
-                                                    <span className="italic">set expectations</span>
                                                 </div>
                                             )}
 
@@ -540,13 +550,37 @@ export default function NotationForm() {
                                                     label="Custom"
                                                 />
                                                 {customActionChecked && (
-                                                    <Input
-                                                        value={customAction}
-                                                        onChange={e => setCustomAction(e.target.value)}
-                                                        placeholder="Type custom action..."
-                                                        className="h-9 text-sm"
-                                                        autoFocus
-                                                    />
+                                                    <div className="space-y-2">
+                                                        {customActions.map((action, i) => (
+                                                            <div key={i} className="flex items-center gap-2">
+                                                                <Input
+                                                                    value={action}
+                                                                    onChange={e => updateCustomAction(i, e.target.value)}
+                                                                    placeholder="Type custom action..."
+                                                                    className="h-9 text-sm"
+                                                                    autoFocus={i === 0}
+                                                                />
+                                                                {customActions.length > 1 && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => removeCustomActionLine(i)}
+                                                                        className="shrink-0 cursor-pointer text-gray-400 hover:text-[#CC0000] transition-colors"
+                                                                        aria-label="Remove custom action"
+                                                                    >
+                                                                        <X className="w-4 h-4" />
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        ))}
+                                                        <button
+                                                            type="button"
+                                                            onClick={addCustomActionLine}
+                                                            className="flex cursor-pointer items-center gap-1 text-xs font-semibold text-gray-500 hover:text-[#CC0000] transition-colors"
+                                                        >
+                                                            <Plus className="w-3.5 h-3.5" />
+                                                            Add another action
+                                                        </button>
+                                                    </div>
                                                 )}
                                             </div>
                                         </div>
@@ -556,7 +590,7 @@ export default function NotationForm() {
                                                 <button
                                                     onClick={submitReport}
                                                     id='report'
-                                                    className={`flex cursor-pointer items-center text-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all ${copied
+                                                    className={`flex cursor-pointer items-center text-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all ${reported
                                                         ? 'bg-green-500 text-white'
                                                         : 'bg-[#CC0000] text-white hover:bg-[#AA0000] active:scale-95'
                                                         }`}

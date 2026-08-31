@@ -11,24 +11,29 @@ export const SERVICE_TYPES = [
 
 export type ServiceTypeValue = (typeof SERVICE_TYPES)[number]['value'];
 
-export const CALL_REASONS: Record<ServiceTypeValue, { value: string; label: string }[]> = {
+export const CALL_REASONS = {
     'bank-account': [
-        { value: 'overdraft-inquiry', label: 'overdraft inquiry' },
-        { value: 'ach-transfer', label: 'an ACH transfer' },
-        { value: 'balance-inquiry', label: 'balance inquiry' },
-        { value: 'trust-inquiry', label: 'trust inquiry/instructions' },
-        { value: 'zelle-inquiry', label: 'Zelle inquiry' },
-        { value: 'account-closure', label: 'closing account(s)' },
-        { value: 'deposit-hold', label: 'deposit hold' },
+        { value: 'ba-bank-inquiry', label: 'bank information' },
+        { value: 'ba-overdraft-inquiry', label: 'overdraft inquiry' },
+        { value: 'ba-ach-transfer', label: 'an ACH transfer' },
+        { value: 'ba-balance-inquiry', label: 'balance inquiry' },
+        { value: 'ba-trust-inquiry', label: 'trust inquiry/instructions' },
+        { value: 'ba-zelle-inquiry', label: 'Zelle inquiry' },
+        { value: 'ba-account-opening', label: 'opening account(s)' },
+        { value: 'ba-account-closure', label: 'closing account(s)' },
+        { value: 'ba-cashiers-check', label: 'Cashier\'s Check' },
+        { value: 'ba-deposit-hold', label: 'deposit hold' },
+        { value: 'ba-check-hold', label: 'check hold' },
+        { value: 'ba-direct-deposit', label: 'direct deposit inquiry' },
     ],
     'digital-issues': [
-        { value: 'account-closing', label: 'account closing' },
-        { value: 'account-opening', label: 'account opening' },
-        { value: 'add-cash-in-store', label: 'add cash in store' },
-        { value: 'add-joint-holder', label: 'add joint holder' },
-        { value: 'bene', label: 'beneficiaries' },
-        { value: 'bill-pay', label: 'Bill Pay' },
-        { value: 'cashiers-check', label: 'Cashier\'s Check' },
+        { value: 'di-account-closing', label: 'account closing' },
+        { value: 'di-account-opening', label: 'account opening' },
+        { value: 'di-add-cash-in-store', label: 'add cash in store' },
+        { value: 'di-add-joint-holder', label: 'add joint holder' },
+        { value: 'di-bene', label: 'beneficiaries' },
+        { value: 'di-bill-pay', label: 'Bill Pay' },
+        { value: 'di-cashiers-check', label: 'Cashier\'s Check' },
     ],
     'debit-card': [
         { value: 'debit-declines', label: 'debit card declines' },
@@ -37,19 +42,21 @@ export const CALL_REASONS: Record<ServiceTypeValue, { value: string; label: stri
         { value: 'debit-limits', label: 'debit card limits' },
     ],
     wire: [
-        { value: 'inbound-wire', label: 'inbound wire instructions' },
-        { value: 'general-wire', label: 'general wire inquiries' },
-        { value: 'outbound-wire', label: 'outbound wire instructions' },
-        { value: 'outbound-wire-status', label: 'outbound wire status' },
+        { value: 'w-inbound-wire', label: 'inbound wire instructions' },
+        { value: 'w-general-wire', label: 'general wire inquiries' },
+        { value: 'w-outbound-wire', label: 'outbound wire instructions' },
+        { value: 'w-outbound-wire-status', label: 'outbound wire status' },
     ],
     'personal-info': [
-        { value: 'update-personal', label: 'updating personal information' },
-        { value: 'kyc-restriction', label: 'KYC restriction' },
+        { value: 'pi-update-personal', label: 'updating personal information' },
+        { value: 'pi-kyc-restriction', label: 'KYC restriction' },
     ],
-};
+} as const satisfies Record<ServiceTypeValue, { value: string; label: string }[]>;
 
-export const ACTION_OPTIONS: Partial<Record<string, { value: string; label: string, variableLabel?: string, variables?: Variables, position?: Position }[]>> = {
-    'ach-transfer': [{
+export type CallReasonValue = (typeof CALL_REASONS)[ServiceTypeValue][number]['value'];
+
+export const ACTION_OPTIONS: Partial<Record<ServiceTypeValue | CallReasonValue, { value: string; label: string, variableLabel?: string, variables?: Variables, position?: Position }[]>> = {
+    'ba-ach-transfer': [{
         value: 'transferred-funds', label: 'transferred funds for customer', variableLabel: '%external% transfer of funds from ACCT #%last4From% to ACCT #%last4To%', variables: {
             last4From: new NotionVariable('number', 'Last 4 of Sender Account'),
             last4To: new NotionVariable('number', 'Last 4 of Reciever Account'),
@@ -59,7 +66,7 @@ export const ACTION_OPTIONS: Partial<Record<string, { value: string; label: stri
     'digital-issues': [{
         value: 'xfr-to-di', label: 'transferred to digital issues', position: 'Core', variableLabel:
             `Troubleshooting Results:
-            GURU's EID: %guru%
+    GURU's EID: %guru%
     Browser/Device customer is using: %browser%
     Using supported browser/device? %supported%
     Accessed site directly (no bookmarks)? %accessedDirectly%
@@ -81,9 +88,24 @@ export const ACTION_OPTIONS: Partial<Record<string, { value: string; label: stri
             eid: new NotionVariable('string', 'Transferring Associate\'s EID'),
         } },
     ],
-    'trust-inquiry': [
+    "ba-direct-deposit": [
+        { value: 'missing-deposit', label: 'gave information that deposit has not posted' },
+    ],
+    "ba-bank-inquiry": [
+        { value: 'gave-information', label: 'gave information of bank information' },
+    ],
+    'ba-trust-inquiry': [
+        { value: 'trust-setup', label: 'informed how to setup trust' },
         { value: 'sent-upload-link', label: 'sent trust upload link' },
         { value: 'resent-invitation-link', label: 'resent joint holder invitation link' }
+    ],
+    'ba-account-closure': [
+        { value: 'closed-accounts', label: 'closed account(s) for customer' },
+        { value: 'closure-case', label: 'submitted case to close accounts' },
+    ],
+    'ba-cashiers-check': [
+        { value: 'self-service', label: 'helped with self-service' },
+        { value: 'cancel-case', label: 'submitted case to cancel cashiers check' }
     ],
     'debit-replacement': [
         { value: 'shipped-card', label: 'shipped new card' },
@@ -91,17 +113,17 @@ export const ACTION_OPTIONS: Partial<Record<string, { value: string; label: stri
     ],
     'debit-transactions': [{ value: 'submitted-claim', label: 'submitted claim' }],
     'debit-limits': [{ value: 'increased-limit', label: 'increased limit' }],
-    'update-personal': [
+    'pi-update-personal': [
         { value: 'updated-phone', label: 'updated phone number' },
         { value: 'updated-email', label: 'updated email' },
         { value: 'updated-employment', label: 'updated employment' },
         { value: 'sent-name-change-link', label: 'sent upload link for name change' },
     ],
-    'kyc-restriction': [{ value: 'sent-kyc-form', label: 'sent KYC form' }],
+    'pi-kyc-restriction': [{ value: 'sent-kyc-form', label: 'sent KYC form' }],
 };
 
 export type Variables = Record<string, NotionVariable>;
-export const VERIFICATION_METHODS = ['ANI', 'OTP', 'GOV', '4TO'] as const;
+export const VERIFICATION_METHODS = ['ANI', 'MAV', 'OTP', 'GOV'] as const;
 export type VerificationMethod = (typeof VERIFICATION_METHODS)[number];
 
 export const ESCALATION_TRIGGERS = [
