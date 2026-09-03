@@ -45,7 +45,7 @@ export default function NotationForm() {
     const [cookies, setCookie, removeCookie] = useCookies(['position', 'eid']);
     const [serviceType, setServiceType] = useState<ServiceTypeValue | ''>('');
     const [callReason, setCallReason] = useState<ServiceTypeValue | CallReasonValue | 'custom' | ''>('');
-    const [customerGoal, setCustomerGoal] = useState('');
+    const [callDetails, setCallDetails] = useState('');
     const [verification, setVerification] = useState<VerificationMethod | ''>('');
     const [selectedActions, setSelectedActions] = useState<string[]>([]);
     const [customReason, setCustomReason] = useState('');
@@ -65,6 +65,8 @@ export default function NotationForm() {
     const notationRef = useRef<HTMLDivElement>(null);
 
     const availableReasons = serviceType ? CALL_REASONS[serviceType] : [];
+    // ACTION_OPTIONS is looked up by the specific call reason first (most specific), falling back
+    // to the broader service type when that reason has no actions of its own defined.
     const availableActions = callReason && callReason !== 'custom'
         ? ACTION_OPTIONS[callReason] ?? (serviceType ? ACTION_OPTIONS[serviceType] : undefined) ?? []
         : [];
@@ -77,7 +79,9 @@ export default function NotationForm() {
     const step2Visible = !!serviceType;
     const step3Visible = !!callReason;
     const isDigitalIssue = serviceType === 'digital-issues';
-    const step4Visible = !!callReason && !isDigitalIssue || !!customerGoal;
+    // Digital Issues skips straight from reason to actions (no goal required) unless a goal was
+    // already typed, so step 4 needs either "reason chosen and not digital-issues" or "goal filled in".
+    const step4Visible = !!callReason && !isDigitalIssue || !!callDetails;
 
     const handleServiceChange = (value: string | null) => {
         setServiceType(value as ServiceTypeValue);
@@ -131,7 +135,7 @@ export default function NotationForm() {
     const handleReset = () => {
         setServiceType('');
         setCallReason('');
-        setCustomerGoal('');
+        setCallDetails('');
         setVerification('');
         setSelectedActions([]);
         setCustomReason('');
@@ -148,6 +152,9 @@ export default function NotationForm() {
         setExpectationsSet('');
     };
 
+    // Builds the comma-separated "actions taken" portion of the notation from every checked
+    // action, swapping in an action's `variableLabel` template (with %placeholder% substitution)
+    // once all of its variables have a value, otherwise falling back to the action's plain label.
     const actionsText = useMemo(() => {
         const labels = selectedActions.map(a => {
             const action = availableActions.find(opt => opt.value === a);
@@ -167,6 +174,9 @@ export default function NotationForm() {
         return labels.join(', ');
     }, [selectedActions, availableActions, customActionChecked, customActions, actionVariables]);
 
+    // Assembles the final copy-pasteable notation text. Escalated calls use a fixed 4-part format;
+    // standard calls number their lines dynamically since the "goal" line is optional (step 3 is
+    // skippable for Digital Issues), and the CIV method/ref number get prefixed onto the actions line.
     const notation = useMemo(() => {
         if (notationType === 'escalated') {
             if (!incidentDescription.trim() || !escalationTrigger || !desiredResolution.trim() || !expectationsSet.trim()) return '';
@@ -185,16 +195,16 @@ export default function NotationForm() {
             callReason === 'custom' ? customReason.trim() : selectedReasonLabel;
         if (!reasonText) return '';
         if (!actionsText) return '';
-        const goal = customerGoal.trim();
+        const details = callDetails.trim();
         const lines: string[] = [];
         if (position) lines.push(position === 'HPX' ? 'HPX Notes' : 'Core Notes');
         lines.push(`1. ${selectedServiceLabel}`);
         lines.push(`2. CCI about ${reasonText}`);
-        if (goal) lines.push(`3. CG ${goal}`);
+        if (details) lines.push(`3. ${details}`);
         const actionLine = verification ? `[${verification}${verification === 'GOV' && !!refNumber.trim() ? ` ${refNumber}` : ''}] ${actionsText}` : actionsText;
-        lines.push(`${goal ? '4' : '3'}. ${actionLine}`);
+        lines.push(`${details ? '4' : '3'}. ${actionLine}`);
         return lines.join('\n');
-    }, [notationType, serviceType, callReason, customReason, refNumber, selectedServiceLabel, selectedReasonLabel, customerGoal, verification, actionsText, position, incidentDescription, escalationTrigger, desiredResolution, expectationsSet]);
+    }, [notationType, serviceType, callReason, customReason, refNumber, selectedServiceLabel, selectedReasonLabel, callDetails, verification, actionsText, position, incidentDescription, escalationTrigger, desiredResolution, expectationsSet]);
 
     useEffect(() => { setMounted(true); }, []);
 
@@ -439,13 +449,13 @@ export default function NotationForm() {
                                 </>
                             )}
 
-                            {/* ── Step 3: Customer Goal ── */}
+                            {/* ── Step 3: Call Details ── */}
                             {step3Visible && (
-                                <Section step={3} label="Customer's Goal">
+                                <Section step={3} label="Call Details">
                                     <textarea
-                                        value={customerGoal}
-                                        onChange={e => setCustomerGoal(e.target.value)}
-                                        placeholder={isDigitalIssue ? "Describe the problem customer is facing..." : "Describe what result the customer was looking for..."}
+                                        value={callDetails}
+                                        onChange={e => setCallDetails(e.target.value)}
+                                        placeholder="Provide additional details of the issue the customer is facing..."
                                         rows={3}
                                         className={textareaClass}
                                     />

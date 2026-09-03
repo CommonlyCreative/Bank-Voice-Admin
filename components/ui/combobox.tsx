@@ -102,7 +102,7 @@ export function Combobox({
               key={o.value}
               onMouseDown={e => { e.preventDefault(); select(o.value) }}
               className={cn(
-                "relative flex cursor-default items-center rounded-md px-2 py-1.5 text-sm select-none hover:bg-accent hover:text-accent-foreground",
+                "relative cursor-pointer flex items-center rounded-md px-2 py-1.5 text-sm select-none hover:bg-accent hover:text-accent-foreground",
                 value === o.value && "font-medium"
               )}
             >
