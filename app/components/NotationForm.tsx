@@ -61,6 +61,7 @@ export default function NotationForm() {
     const [escalationTrigger, setEscalationTrigger] = useState<EscalationTrigger | ''>('');
     const [desiredResolution, setDesiredResolution] = useState('');
     const [expectationsSet, setExpectationsSet] = useState('');
+    const [caseNumber, setCaseNumber] = useState('');
 
     const notationRef = useRef<HTMLDivElement>(null);
 
@@ -150,6 +151,7 @@ export default function NotationForm() {
         setEscalationTrigger('');
         setDesiredResolution('');
         setExpectationsSet('');
+        setCaseNumber('');
     };
 
     // Builds the comma-separated "actions taken" portion of the notation from every checked
@@ -181,8 +183,12 @@ export default function NotationForm() {
         if (notationType === 'escalated') {
             if (!incidentDescription.trim() || !escalationTrigger || !desiredResolution.trim() || !expectationsSet.trim()) return '';
             const triggerLabel = ESCALATION_TRIGGERS.find(t => t.value === escalationTrigger)?.label ?? escalationTrigger;
+            const trimmedCaseNumber = caseNumber.trim();
+            const header = trimmedCaseNumber
+                ? `HPX Notes - Tier 2 complaint or escalation case submitted (case #${trimmedCaseNumber})`
+                : 'HPX Notes';
             return [
-                'HPX Notes',
+                header,
                 `1. Description of the incident: ${incidentDescription.trim()}`,
                 `2. Why did it meet the selected trigger: ${triggerLabel}`,
                 `3. Desired resolution the customer looking for: ${desiredResolution.trim()}`,
@@ -204,7 +210,7 @@ export default function NotationForm() {
         const actionLine = verification ? `[${verification}${verification === 'GOV' && !!refNumber.trim() ? ` ${refNumber}` : ''}] ${actionsText}` : actionsText;
         lines.push(`${details ? '4' : '3'}. ${actionLine}`);
         return lines.join('\n');
-    }, [notationType, serviceType, callReason, customReason, refNumber, selectedServiceLabel, selectedReasonLabel, callDetails, verification, actionsText, position, incidentDescription, escalationTrigger, desiredResolution, expectationsSet]);
+    }, [notationType, serviceType, callReason, customReason, refNumber, selectedServiceLabel, selectedReasonLabel, callDetails, verification, actionsText, position, incidentDescription, escalationTrigger, desiredResolution, expectationsSet, caseNumber]);
 
     useEffect(() => { setMounted(true); }, []);
 
@@ -392,6 +398,18 @@ export default function NotationForm() {
                                     rows={3}
                                     className={textareaClass}
                                 />
+                            </Section>
+                            <Divider />
+                            <Section step={5} label="Case Number">
+                                <Input
+                                    value={caseNumber}
+                                    onChange={e => setCaseNumber(e.target.value)}
+                                    placeholder="Enter case number..."
+                                    className="h-9 text-sm max-w-xs"
+                                />
+                                <p className="text-xs text-muted-foreground mt-1">
+                                    Optional — when filled in, adds &quot;Tier 2 complaint or escalation case submitted (case #{caseNumber.trim() || '...'})&quot; next to HPX Notes.
+                                </p>
                             </Section>
                         </div>
                     ) : (
