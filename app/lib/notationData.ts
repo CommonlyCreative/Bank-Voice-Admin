@@ -122,8 +122,9 @@ export const ACTION_OPTIONS: Partial<Record<ServiceTypeValue | CallReasonValue, 
     },
     { value: 'submitted-di-ticket', label: 'submitted digital issue ticket', position: 'HPX', },
     {
-        value: 'invalid-np', label: 'INVALID_NP', position: 'HPX', variableLabel: 'INVALID_NP %eid%', variables: {
+        value: 'invalid-np', label: 'INVALID_NP', position: 'HPX', variableLabel: 'INVALID_NP %eid%, %reason%', variables: {
             eid: new NotionVariable('string', 'Transferring Associate\'s EID'),
+            reason: new NotionVariable('string', 'Reason for being invalid'),
         }
     },
     ],
