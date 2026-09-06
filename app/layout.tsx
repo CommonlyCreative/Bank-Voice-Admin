@@ -1,12 +1,8 @@
 import type { Metadata } from 'next';
-import { Geist } from 'next/font/google';
+import { GeistSans } from 'geist/font/sans';
 import './globals.css';
 import { Toaster } from '@/components/ui/toast';
 
-const geist = Geist({
-  variable: '--font-geist-sans',
-  subsets: ['latin'],
-});
 
 export const metadata: Metadata = {
   title: 'BVA | Capital One High Priority',
@@ -19,7 +15,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${geist.variable} h-full`}>
+    <html lang="en" className={`${GeistSans.variable} h-full`}>
       <body className="min-h-full bg-gray-50 font-sans antialiased">{children}</body>
       <Toaster />
     </html>

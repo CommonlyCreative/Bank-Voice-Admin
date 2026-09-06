@@ -36,8 +36,8 @@ export type ReportedNotation = {
 export type Report = {
     /** Employee ID of the rep who submitted the report. */
     eid: string,
-    reason: string,
-    action: string
+    reason?: string,
+    action?: string
     /** The full generated notation text, exactly as it would be copied to the customer's account. */
     fullNote: string
 }

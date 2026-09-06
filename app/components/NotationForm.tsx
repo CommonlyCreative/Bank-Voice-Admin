@@ -13,6 +13,8 @@ import {
     type Variables,
     type EscalationTrigger,
     CallReasonValue,
+    AutoFillEscalation,
+    AUTOFILL_ESCALATIONS,
 } from '@/app/lib/notationData';
 import {
     Select,
@@ -33,6 +35,7 @@ import { Flag, FlagIcon, Plus, X } from 'lucide-react';
 import { reportNote } from '../lib/actions';
 import { toast } from '@/components/ui/toast';
 import { useRouter } from 'next/navigation';
+import { mergeArrays } from '@/lib/utils';
 
 const textareaClass =
     'w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm ' +
@@ -62,6 +65,7 @@ export default function NotationForm() {
     const [desiredResolution, setDesiredResolution] = useState('');
     const [expectationsSet, setExpectationsSet] = useState('');
     const [caseNumber, setCaseNumber] = useState('');
+    const [autoFillEscalation, setAutoFillEscalation] = useState<AutoFillEscalation | ''>('');
 
     const notationRef = useRef<HTMLDivElement>(null);
 
@@ -69,7 +73,7 @@ export default function NotationForm() {
     // ACTION_OPTIONS is looked up by the specific call reason first (most specific), falling back
     // to the broader service type when that reason has no actions of its own defined.
     const availableActions = callReason && callReason !== 'custom'
-        ? ACTION_OPTIONS[callReason] ?? (serviceType ? ACTION_OPTIONS[serviceType] : undefined) ?? []
+        ? mergeArrays(ACTION_OPTIONS[callReason], (serviceType ? ACTION_OPTIONS[serviceType] : undefined))
         : [];
     const selectedReasonLabel = availableReasons.find(r => r.value === callReason)?.label ?? '';
     const selectedServiceLabel = SERVICE_TYPES.find(s => s.value === serviceType)?.label ?? '';
@@ -262,6 +266,35 @@ export default function NotationForm() {
         })
     };
 
+    const submitEscalationReport = async () => {
+        const missingInformation = !notation || !desiredResolution || !expectationsSet || !escalationTrigger || !incidentDescription
+        const notSignedIn = !eid
+        if (notSignedIn) return toast.add({
+            type: "error",
+            description: "You're missing your employee information to be able to report.",
+            actionProps: {
+                children: "Refresh",
+                onClick() {
+                    window.location.reload();
+                },
+            },
+        });
+        if (missingInformation) return toast.add({
+            type: "error",
+            description: "Please complete the notation before reporting.",
+        });
+        if (reported) return toast.add({
+            type: "error",
+            description: "You already reported this calls note. Please create a new call.",
+        });
+        await reportNote('escalation', { eid: cookies.eid, fullNote: notation })
+        setReported(true);
+        toast.add({
+            type: 'success',
+            description: 'Note has been successfully reported!'
+        })
+    };
+
     const getVariable = (action: string, variable: string) => {
         return actionVariables[action]?.[variable];
     };
@@ -277,6 +310,23 @@ export default function NotationForm() {
             };
         });
     };
+
+    const handleAutoFillChange = (value: string | null) => {
+        if (value) {
+            const autoFill = AUTOFILL_ESCALATIONS.find(escalation => escalation.value === value)
+            if (autoFill) {
+                setIncidentDescription(autoFill.description)
+                setDesiredResolution(autoFill.resolution)
+                setExpectationsSet(autoFill.expectations)
+            }
+            setAutoFillEscalation(autoFill ?? '')
+        } else {
+            setIncidentDescription('')
+            setDesiredResolution('')
+            setExpectationsSet('')
+            setAutoFillEscalation('')
+        }
+    }
 
     const availablePositionedActions = availableActions.filter(action => !action.position || action.position === position)
 
@@ -321,11 +371,10 @@ export default function NotationForm() {
                             {(['standard', 'escalated'] as const).map(t => (
                                 <button key={t} type="button"
                                     onClick={() => setNotationType(t)}
-                                    className={`px-3 py-1 rounded-full text-xs font-bold border-2 transition-all ${
-                                        notationType === t
-                                            ? 'bg-[#CC0000] border-[#CC0000] text-white shadow-sm'
-                                            : 'bg-white border-gray-200 text-gray-500 hover:border-[#CC0000] hover:text-[#CC0000]'
-                                    }`}
+                                    className={`px-3 py-1 rounded-full text-xs font-bold border-2 transition-all ${notationType === t
+                                        ? 'bg-[#CC0000] border-[#CC0000] text-white shadow-sm'
+                                        : 'bg-white border-gray-200 text-gray-500 hover:border-[#CC0000] hover:text-[#CC0000]'
+                                        }`}
                                 >
                                     {t === 'standard' ? 'Standard' : 'Escalated'}
                                 </button>
@@ -355,6 +404,20 @@ export default function NotationForm() {
                     {notationType === 'escalated' ? (
                         /* ── Escalated form ── */
                         <div className="px-6 py-5 space-y-6">
+                            <Section step={0} label="Pregenerated">
+                                <Combobox
+                                    value={autoFillEscalation ? autoFillEscalation.value : null}
+                                    onValueChange={(value) => handleAutoFillChange(value)}
+                                    options={[
+                                        ...AUTOFILL_ESCALATIONS,
+                                        // { value: 'custom', label: 'Custom...' },
+                                    ]}
+                                    placeholder="select a reason..."
+                                    searchPlaceholder="Search reasons..."
+                                    className="w-auto min-w-48 flex-1"
+                                    onClear={() => handleAutoFillChange(null)}
+                                />
+                            </Section>
                             <Section step={1} label="Description of Incident">
                                 <textarea
                                     value={incidentDescription}
@@ -411,6 +474,40 @@ export default function NotationForm() {
                                     Optional — when filled in, adds &quot;Tier 2 complaint or escalation case submitted (case #{caseNumber.trim() || '...'})&quot; next to HPX Notes.
                                 </p>
                             </Section>
+                            {/* Report */}
+                            {!autoFillEscalation && (
+                                <div className='flex gap-2 mt-5'>
+                                    <Label htmlFor='report'>Need to report this submission?</Label>
+                                    <button
+                                        onClick={submitEscalationReport}
+                                        id='report'
+                                        className={`flex cursor-pointer items-center text-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold tracking-wide transition-all ${reported
+                                            ? 'bg-green-500 text-white'
+                                            : 'bg-[#CC0000] text-white hover:bg-[#AA0000] active:scale-95'
+                                            }`}
+                                    >
+                                        {reported ? (
+                                            <>
+                                                <svg className="w-3 h-3" viewBox="0 0 12 10" fill="none">
+                                                    <path
+                                                        d="M1 5l4 4 6-8"
+                                                        stroke="currentColor"
+                                                        strokeWidth="1.8"
+                                                        strokeLinecap="round"
+                                                        strokeLinejoin="round"
+                                                    />
+                                                </svg>
+                                                Reported!
+                                            </>
+                                        ) : (
+                                            <>
+                                                <FlagIcon className='w-3 h-3' />
+                                                Report
+                                            </>
+                                        )}
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     ) : (
                         /* ── Standard form ── */

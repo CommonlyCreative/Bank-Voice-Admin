@@ -27,7 +27,7 @@ export const CALL_REASONS = {
     'bank-account': [
         { value: 'ba-bank-inquiry', label: 'bank information' },
         { value: 'ba-overdraft-inquiry', label: 'overdraft inquiry' },
-        { value: 'ba-ach-transfer', label: 'an ACH transfer' },
+        { value: 'ba-link-management', label: 'link management' },
         { value: 'ba-transactions', label: 'bank transactions' },
         { value: 'ba-balance-inquiry', label: 'balance inquiry' },
         { value: 'ba-trust-inquiry', label: 'trust inquiry/instructions' },
@@ -93,13 +93,35 @@ export type CallReasonValue = (typeof CALL_REASONS)[ServiceTypeValue][number]['v
  * `position` restricts an action to a specific rep type ('HPX' | 'Core'); omit it to allow both.
  */
 export const ACTION_OPTIONS: Partial<Record<ServiceTypeValue | CallReasonValue, { value: string; label: string, variableLabel?: string, variables?: Variables, position?: Position }[]>> = {
-    'ba-ach-transfer': [{
+    'bank-account': [
+        {
+            value: 'transferred-acct-activity', label: 'transferred to account activity', variableLabel: '%available%', variables: {
+                available: new NotionBooleanVariable('Is Account Activity closed?', 'gave phone number to call account activity when open', 'transferred to account activity')
+            }
+        },
+        {
+            value: 'transferred-id', label: 'transferred to id verification', variableLabel: '%available%', variables: {
+                available: new NotionBooleanVariable('Is ID Verification closed?', 'gave phone number to call id verification when open', 'transferred to account activity')
+            }
+        },
+        {
+            value: 'transferred-cc', label: 'transferred to credit card'
+        },
+    ],
+    'ba-transactions': [
+        { value: 'gave-information', label: 'informed customer of recent bank transactions' },
+        { value: 'gave-information-checks', label: 'informed customer of cashed checks' },
+    ],
+    'ba-link-management': [{
         value: 'transferred-funds', label: 'transferred funds for customer', variableLabel: '%external% transfer of funds from ACCT #%last4From% to ACCT #%last4To%', variables: {
             last4From: new NotionVariable('number', 'Last 4 of Sender Account'),
             last4To: new NotionVariable('number', 'Last 4 of Reciever Account'),
             external: new NotionBooleanVariable('External Transfer?', 'EXT', 'INT')
         }
-    }],
+    },
+    { value: 'verified-account', label: 'verified external account for customer' },
+    { value: 'gave-information', label: 'informed customer of linked account management' },
+    ],
     'digital-issues': [{
         value: 'xfr-to-di', label: 'transferred to digital issues', position: 'Core', variableLabel:
             `Troubleshooting Results:
@@ -150,7 +172,7 @@ export const ACTION_OPTIONS: Partial<Record<ServiceTypeValue | CallReasonValue, 
     ],
     "ba-documents": [
         {
-            value: 'dupe-case', label: 'submitted copy request case for documents', variableLabel: 'submitted copy request case for documents [%case%]',
+            value: 'dupe-case', label: 'submitted copy request case for documents', variableLabel: 'submitted copy request case for documents (case #%case%)',
             variables: {
                 case: new NotionVariable('number', 'Case #'),
             }
@@ -224,10 +246,18 @@ export type VerificationMethod = (typeof VERIFICATION_METHODS)[number];
 /** Reasons a "standard" notation escalates into the separate escalated-notation flow. */
 export const ESCALATION_TRIGGERS = [
     { value: 'requested-manager', label: 'Requested Manager' },
+    { value: 'non-productive', label: 'Non-productive' },
     { value: 'multiple-request', label: 'Multiple Request' },
     { value: 'threaten-legal', label: 'Threaten Legal' },
     { value: 'violation-of-regulation', label: 'Violation of Regulation' },
     { value: 'sales-manipulation', label: 'Sales Manipulation' },
 ] as const;
+
+export const AUTOFILL_ESCALATIONS = [
+    { value: "zelle-awp", label: "Zelle AWP", description: "Zelle AWP timeframes", resolution: "have hold released", expectations: "informed customer of Zelle AWP timeframes" },
+    { value: "check-hold", label: "Check Hold", description: "check hold on account", resolution: "have hold released", expectations: "informed customer of check hold timeframes" },
+] as AutoFillEscalation[]
+
+export type AutoFillEscalation = { value: string, label: string, description: string, resolution: string, expectations: string }
 
 export type EscalationTrigger = (typeof ESCALATION_TRIGGERS)[number]['value'];
